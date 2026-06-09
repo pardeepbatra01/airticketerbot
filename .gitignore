@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+
+# Secrets / local config
+.env
+.env.local
+
+# Captured session + debugging artifacts
+.jane-session.json
+*.har
+debug-*.html
