@@ -95,19 +95,21 @@ export class JaneClient {
   // --- authentication -----------------------------------------------------
 
   /**
-   * Sign in with username/password against the clinic's /admin sign-in form.
+   * Sign in with username/password against the clinic's sign-in form.
    *
-   * Flow (standard Rails/Devise pattern that Jane uses):
-   *   1. GET the sign-in page and scrape the authenticity_token (CSRF).
-   *   2. POST the credentials + token as form-encoded data.
-   *   3. A successful login redirects away from the sign-in page and sets a
-   *      session cookie; a failed one re-renders the form with an error.
+   * Rather than hardcoding field names, we parse the ACTUAL form from the
+   * sign-in page — its action URL, the username/password input names, and all
+   * hidden fields (authenticity_token, etc.) — and submit exactly that. This
+   * adapts to whatever the clinic's form really looks like.
+   *
+   *   1. GET /admin (redirects to the real sign-in page).
+   *   2. Parse the form, fill username/password, POST it.
+   *   3. A successful login sets a session cookie and leaves the sign-in form;
+   *      a failed one re-renders it, or asks for a 2-step verification code.
    */
   async login(): Promise<void> {
-    const signInPath = '/admin';
-
-    // 1. Fetch the sign-in page and extract the CSRF token.
-    const page = await this.http.get(signInPath);
+    // 1. Fetch the sign-in page (/admin redirects to it when unauthenticated).
+    const page = await this.http.get('/admin');
     await this.maybeDump('login-page', page);
 
     if (this.looksLoggedIn(page)) {
@@ -117,39 +119,36 @@ export class JaneClient {
       return;
     }
 
-    const token = this.extractFormAuthenticityToken(page.data);
-    if (!token) {
+    // 2. Parse the real form instead of guessing field names.
+    const pageUrl = this.finalUrl(page) ?? `${this.config.baseUrl}/admin`;
+    const form = this.parseLoginForm(page.data, pageUrl);
+    if (!form) {
       throw new JaneAuthError(
-        'Could not find an authenticity_token on the sign-in page. ' +
-          'Jane may have changed its login form, or the URL is wrong. ' +
-          'Enable JANE_DEBUG=true to dump the page.',
+        'Could not find a username/password form on the sign-in page. It may ' +
+          'be JavaScript-rendered (in which case raw HTTP cannot log in — use ' +
+          'the headless-browser approach), or the clinic only offers Google/SSO ' +
+          'sign-in. Enable JANE_DEBUG=true and inspect debug-login-page.html.',
       );
     }
 
-    // 2. POST the credentials. Field names mirror Jane's staff sign-in form.
-    //    If login fails, double-check these against your clinic's form markup
-    //    (README: "Verifying the login field names").
-    const form = new URLSearchParams();
-    form.set('authenticity_token', token);
-    form.set('auth_key', this.config.username);
-    form.set('password', this.config.password);
-    form.set('commit', 'Sign in');
+    const body = new URLSearchParams(form.fields);
+    body.set(form.usernameName, this.config.username);
+    body.set(form.passwordName, this.config.password);
+    const csrf = form.fields['authenticity_token'] ?? this.extractMetaCsrf(page.data) ?? '';
 
-    const result = await this.http.post(signInPath, form.toString(), {
+    const result = await this.http.post(form.actionUrl, body.toString(), {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Origin: this.config.baseUrl,
-        Referer: `${this.config.baseUrl}${signInPath}`,
-        'X-CSRF-Token': token,
+        Referer: pageUrl,
+        'X-CSRF-Token': csrf,
       },
     });
     await this.maybeDump('login-result', result);
 
-    // 3. Decide success. Jane redirects to the dashboard on success; on failure
-    //    it re-renders the sign-in form (often with "Invalid" text) or asks for
-    //    a 2-step verification code.
-    const body = typeof result.data === 'string' ? result.data : '';
-    if (this.mentionsMfa(body)) {
+    // 3. Decide the outcome.
+    const resultBody = typeof result.data === 'string' ? result.data : '';
+    if (this.mentionsMfa(resultBody)) {
       throw new JaneAuthError(
         '2-Step Verification (MFA) is enabled on this account. The raw HTTP ' +
           'login cannot complete an MFA challenge — disable MFA for this ' +
@@ -157,13 +156,14 @@ export class JaneClient {
       );
     }
 
-    this.csrfToken = this.extractMetaCsrf(body) ?? token;
+    this.csrfToken = this.extractMetaCsrf(resultBody) ?? csrf ?? null;
     this.authenticated = await this.verifySession();
     if (!this.authenticated) {
       throw new JaneAuthError(
-        'Login did not produce an authenticated session. Most likely the ' +
-          'username/password is wrong, or the form field names have changed. ' +
-          'Enable JANE_DEBUG=true and inspect debug-login-result.html.',
+        'Login did not produce an authenticated session. The credentials were ' +
+          'likely rejected — double-check by signing in manually in a browser ' +
+          'at <clinic>/admin with the exact same username/password. Enable ' +
+          'JANE_DEBUG=true and inspect debug-login-result.html.',
       );
     }
 
@@ -238,12 +238,80 @@ export class JaneClient {
 
   // --- HTML helpers -------------------------------------------------------
 
-  private extractFormAuthenticityToken(html: unknown): string | null {
+  /** Resolve the final URL after redirects, for resolving relative form actions. */
+  private finalUrl(res: AxiosResponse): string | null {
+    const req = res.request as
+      | { res?: { responseUrl?: string }; responseURL?: string }
+      | undefined;
+    return req?.res?.responseUrl ?? req?.responseURL ?? null;
+  }
+
+  /**
+   * Parse the real sign-in form so we submit exactly what the clinic expects.
+   * Picks the form containing a password input, reads its action + the
+   * username/password field names, and carries over every hidden/default field
+   * (authenticity_token, utf8, the submit button, etc.).
+   */
+  private parseLoginForm(
+    html: unknown,
+    pageUrl: string,
+  ): {
+    actionUrl: string;
+    usernameName: string;
+    passwordName: string;
+    fields: Record<string, string>;
+  } | null {
     if (typeof html !== 'string') return null;
     const $ = cheerio.load(html);
-    const fromInput = $('input[name="authenticity_token"]').attr('value');
-    if (fromInput) return fromInput;
-    return this.extractMetaCsrf(html);
+
+    const form = $('form')
+      .filter((_, el) => $(el).find('input[type="password"]').length > 0)
+      .first();
+    if (form.length === 0) return null;
+
+    const passwordName = form.find('input[type="password"]').first().attr('name');
+    if (!passwordName) return null;
+
+    // Username = first visible text/email/tel/search input that isn't password.
+    let usernameName: string | undefined;
+    form.find('input').each((_, el) => {
+      if (usernameName) return;
+      const name = $(el).attr('name');
+      const type = ($(el).attr('type') ?? 'text').toLowerCase();
+      if (name && ['text', 'email', 'tel', 'search', ''].includes(type)) {
+        usernameName = name;
+      }
+    });
+    if (!usernameName) return null;
+
+    // Carry over hidden/default fields + the first submit button's name/value.
+    const fields: Record<string, string> = {};
+    let submitIncluded = false;
+    form.find('input').each((_, el) => {
+      const name = $(el).attr('name');
+      if (!name || name === usernameName || name === passwordName) return;
+      const type = ($(el).attr('type') ?? 'text').toLowerCase();
+      if (type === 'submit' || type === 'button') {
+        if (!submitIncluded) {
+          fields[name] = $(el).attr('value') ?? '';
+          submitIncluded = true;
+        }
+        return;
+      }
+      if (type === 'checkbox' || type === 'radio') {
+        if ($(el).attr('checked') !== undefined) fields[name] = $(el).attr('value') ?? 'on';
+        return;
+      }
+      fields[name] = $(el).attr('value') ?? '';
+    });
+    if (!submitIncluded) {
+      const btn = form.find('button[type="submit"], button:not([type])').first();
+      const bname = btn.attr('name');
+      if (bname) fields[bname] = btn.attr('value') ?? '';
+    }
+
+    const actionUrl = new URL(form.attr('action') || pageUrl, pageUrl).toString();
+    return { actionUrl, usernameName, passwordName, fields };
   }
 
   private extractMetaCsrf(html: unknown): string | null {
@@ -255,18 +323,17 @@ export class JaneClient {
   /**
    * Heuristic: are we looking at the authenticated app rather than the form?
    * axios follows redirects, so by the time we get here `res` is the final
-   * response. We're authenticated if it's a 2xx that is NOT the sign-in form.
+   * response. We're authenticated if it's a 2xx that is NOT a sign-in page —
+   * detected by the presence of a password input (field-name agnostic).
    */
   private looksLoggedIn(res: AxiosResponse): boolean {
     if (res.status < 200 || res.status >= 300) return false;
     const body = typeof res.data === 'string' ? res.data : '';
     if (!body) return true;
-    const onSignInForm =
-      /name="auth_key"/.test(body) ||
-      /Sign in to your account/i.test(body) ||
-      /id="new_session"/.test(body) ||
-      /<form[^>]*action="[^"]*\/admin"[^>]*>[\s\S]*?type="password"/i.test(body);
-    return !onSignInForm;
+    const $ = cheerio.load(body);
+    const hasPasswordForm = $('input[type="password"]').length > 0;
+    const saysSignIn = /please sign in|sign in to your account/i.test(body);
+    return !hasPasswordForm && !saysSignIn;
   }
 
   private mentionsMfa(body: string): boolean {

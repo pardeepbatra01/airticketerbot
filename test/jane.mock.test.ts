@@ -24,13 +24,20 @@ const FORM_TOKEN = 'FORM-CSRF-TOKEN-123';
 const META_TOKEN = 'META-CSRF-TOKEN-456';
 const SESSION_COOKIE = '_jane_session=valid-session-abc';
 
+// Deliberately uses a NON-/admin action and namespaced field names that don't
+// match any hardcoded guess — proves the client parses the real form (action +
+// field names + hidden fields) rather than assuming them.
 function signInPage(): string {
   return `<!doctype html><html><body>
-    <form id="new_session" action="/admin" method="post">
+    <h1>Welcome back. Please sign in.</h1>
+    <form id="new_session" action="/staff_member/sign_in" method="post">
+      <input type="hidden" name="utf8" value="✓">
       <input type="hidden" name="authenticity_token" value="${FORM_TOKEN}">
-      <input name="auth_key" type="text">
-      <input name="password" type="password">
-      <input type="submit" name="commit" value="Sign in">
+      <label>Email, username or mobile phone</label>
+      <input name="session[auth_key]" type="email">
+      <label>Password</label>
+      <input name="session[password]" type="password">
+      <button type="submit" name="commit" value="Sign In">Sign In</button>
     </form>
   </body></html>`;
 }
@@ -67,15 +74,17 @@ function makeServer(mode: Mode): http.Server {
       return;
     }
 
-    // --- login POST ---
-    if (url.pathname === '/admin' && req.method === 'POST') {
+    // --- login POST (note: NOT /admin — the client must read the form action) ---
+    if (url.pathname === '/staff_member/sign_in' && req.method === 'POST') {
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         const form = new URLSearchParams(body);
         const tokenOk = form.get('authenticity_token') === FORM_TOKEN;
+        // The client must have carried the namespaced field names through.
         const credsOk =
-          form.get('auth_key') === GOOD_USER && form.get('password') === GOOD_PASS;
+          form.get('session[auth_key]') === GOOD_USER &&
+          form.get('session[password]') === GOOD_PASS;
 
         if (mode === 'mfa' && tokenOk && credsOk) {
           res.writeHead(200, { 'content-type': 'text/html' });
