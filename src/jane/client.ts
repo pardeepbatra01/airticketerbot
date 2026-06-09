@@ -53,6 +53,59 @@ export class JaneClient {
     return this.authenticated;
   }
 
+  /**
+   * Fetch the sign-in page and report its structure WITHOUT logging in or
+   * exposing secrets. Used to diagnose why login fails: it shows whether a
+   * real <form> exists in the server HTML (vs. a JS-rendered SPA), the form's
+   * action + method, and every field's name/type — exactly what the login
+   * parser depends on. Safe to paste: contains no credentials.
+   */
+  async diagnoseLoginPage(): Promise<string> {
+    const page = await this.http.get('/admin');
+    await this.maybeDump('login-page', page);
+    const html = typeof page.data === 'string' ? page.data : '';
+    const out: string[] = [];
+    out.push(`status: ${page.status}`);
+    out.push(`finalUrl: ${this.finalUrl(page) ?? '(unknown)'}`);
+    out.push(`htmlLength: ${html.length}`);
+
+    const $ = cheerio.load(html);
+    out.push(`meta[name=csrf-token] present: ${$('meta[name="csrf-token"]').length > 0}`);
+
+    const forms = $('form');
+    out.push(`<form> count: ${forms.length}`);
+    forms.each((i, f) => {
+      const $f = $(f);
+      out.push(
+        `  form[${i}] action="${$f.attr('action') ?? ''}" method="${$f.attr('method') ?? ''}" id="${$f.attr('id') ?? ''}"`,
+      );
+      $f.find('input, button, select').each((_, el) => {
+        const $el = $(el);
+        const tag = (el as { tagName?: string }).tagName ?? 'node';
+        out.push(`    ${tag} name="${$el.attr('name') ?? ''}" type="${$el.attr('type') ?? ''}"`);
+      });
+    });
+
+    const scripts = $('script[src]').length;
+    const reactRoot = $('#root, #app, [data-react-class], [data-reactroot]').length > 0;
+    out.push(`script[src] count: ${scripts}; react-ish root: ${reactRoot}`);
+    if (forms.length === 0) {
+      out.push(
+        'DIAGNOSIS: no <form> in server HTML — the login form is JavaScript-rendered. ' +
+          'Raw HTTP cannot scrape it; we must either replicate the JSON login XHR or ' +
+          'use a headless browser (Playwright).',
+      );
+    } else if ($('input[type="password"]').length === 0) {
+      out.push(
+        'DIAGNOSIS: a <form> exists but has no password field — likely a two-step ' +
+          '(email first) login, or the password field is JS-injected.',
+      );
+    } else {
+      out.push('DIAGNOSIS: a password form is present in server HTML — the parser should work.');
+    }
+    return out.join('\n');
+  }
+
   // --- session persistence ------------------------------------------------
 
   /** Load a previously saved cookie jar so we can skip re-login. */

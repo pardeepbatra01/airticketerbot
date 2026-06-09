@@ -67,6 +67,11 @@ async function main() {
       console.log(`✓ Authenticated against ${client.baseUrl}`);
       break;
     }
+    case 'diagnose': {
+      // Inspects the sign-in page structure (no login, no secrets).
+      console.log(await client.diagnoseLoginPage());
+      break;
+    }
     case 'staff': {
       console.log(JSON.stringify(await appts.listStaffMembers(), null, 2));
       break;
@@ -110,6 +115,7 @@ function printHelp() {
 
 Commands:
   login-check                 Verify URL + username + password produce a session
+  diagnose                    Inspect the sign-in page structure (no login, no secrets)
   staff                       List staff members (get their IDs)
   treatments                  List treatments (get their IDs)
   locations                   List locations (get their IDs)
