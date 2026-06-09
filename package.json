@@ -12,6 +12,7 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "login-check": "tsx src/cli.ts login-check",
+    "test": "tsx test/jane.mock.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [
