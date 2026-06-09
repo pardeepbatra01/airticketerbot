@@ -21,31 +21,31 @@ import {
 export class JaneAppointments {
   constructor(private readonly client: JaneClient) {}
 
-  /** List staff members (practitioners). */
+  /** List staff members (practitioners). Public — no login required. */
   async listStaffMembers(): Promise<StaffMember[]> {
     return unwrap<StaffMember>(
-      await this.client.apiGet('/api/v2/staff_members'),
+      await this.client.publicGet('/api/v2/staff_members'),
       'staff_members',
     );
   }
 
-  /** List bookable treatments / services. */
+  /** List bookable treatments / services. Public — no login required. */
   async listTreatments(): Promise<Treatment[]> {
     return unwrap<Treatment>(
-      await this.client.apiGet('/api/v2/treatments'),
+      await this.client.publicGet('/api/v2/treatments'),
       'treatments',
     );
   }
 
-  /** List clinic locations. */
+  /** List clinic locations. Public — no login required. */
   async listLocations(): Promise<Location[]> {
     return unwrap<Location>(
-      await this.client.apiGet('/api/v2/locations'),
+      await this.client.publicGet('/api/v2/locations'),
       'locations',
     );
   }
 
-  /** Search patients by name/email. */
+  /** Search patients by name/email. Requires authentication (not public). */
   async searchPatients(query: string): Promise<Patient[]> {
     return unwrap<Patient>(
       await this.client.apiGet('/api/v2/patients', { query }),

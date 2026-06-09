@@ -7,12 +7,38 @@
  * Network tab (see README "Capturing the real endpoint").
  */
 
-/** A staff member (practitioner) as returned by Jane. */
+/** A bookable discipline (service category), as embedded in a staff member. */
+export interface Discipline {
+  id: number;
+  name?: string;
+  professional_title?: string;
+  book_online?: boolean;
+  normalized_type?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * A staff member (practitioner). Field names mirror the real
+ * /api/v2/staff_members payload from a live clinic (the public online-booking
+ * API — returned without authentication).
+ */
 export interface StaffMember {
   id: number;
   full_name?: string;
   first_name?: string;
   last_name?: string;
+  professional_name?: string;
+  suffix?: string | null;
+  prefix?: string | null;
+  allow_online_booking?: boolean;
+  /** Disciplines this practitioner offers (embedded in the staff record). */
+  disciplines?: Discipline[];
+  /** Treatment IDs this practitioner can be booked for. */
+  all_treatment_ids?: number[];
+  /** Preferred display order of treatments. */
+  treatment_order?: number[];
+  /** Location IDs this practitioner works at. */
+  location_ids?: number[];
   [key: string]: unknown;
 }
 

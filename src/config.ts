@@ -24,6 +24,25 @@ export function normalizeBaseUrl(raw: string): string {
   return `${url.protocol}//${url.host}`;
 }
 
+/**
+ * Config for PUBLIC reads only (staff/treatments/locations). Requires just
+ * JANE_BASE_URL — no credentials, since those endpoints need no login.
+ */
+export function loadPublicConfig(): JaneConfig {
+  const baseUrlRaw = process.env.JANE_BASE_URL;
+  if (!baseUrlRaw) {
+    throw new Error('Missing required environment variable: JANE_BASE_URL');
+  }
+  const sessionFileRaw = (process.env.JANE_SESSION_FILE ?? '').trim();
+  return {
+    baseUrl: normalizeBaseUrl(baseUrlRaw),
+    username: process.env.JANE_USERNAME ?? '',
+    password: process.env.JANE_PASSWORD ?? '',
+    sessionFile: sessionFileRaw.length > 0 ? sessionFileRaw : null,
+    debug: (process.env.JANE_DEBUG ?? '').toLowerCase() === 'true',
+  };
+}
+
 export function loadConfig(): JaneConfig {
   const baseUrlRaw = process.env.JANE_BASE_URL;
   const username = process.env.JANE_USERNAME;

@@ -104,17 +104,18 @@ function makeServer(mode: Mode): http.Server {
       return;
     }
 
-    // --- authenticated JSON endpoints ---
-    if (!authed) {
-      // Real Jane redirects unauthenticated API calls to the sign-in HTML.
-      res.writeHead(200, { 'content-type': 'text/html' });
-      res.end(signInPage());
+    // --- PUBLIC read endpoints (no session required — Jane's online-booking API) ---
+    if (url.pathname === '/api/v2/staff_members' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify([{ id: 12, full_name: 'Dr. Ada Lovelace', location_ids: [1] }]));
       return;
     }
 
-    if (url.pathname === '/api/v2/staff_members' && req.method === 'GET') {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ staff_members: [{ id: 12, full_name: 'Dr. Ada Lovelace' }] }));
+    // --- authenticated JSON endpoints (writes) ---
+    if (!authed) {
+      // Real Jane redirects unauthenticated admin/API calls to the sign-in HTML.
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(signInPage());
       return;
     }
 
@@ -181,12 +182,14 @@ async function main() {
     });
   });
 
-  await test('lists staff via authenticated JSON GET', async () => {
+  await test('lists staff WITHOUT logging in (public booking API)', async () => {
     await withServer('happy', async (baseUrl) => {
       const client = new JaneClient(baseConfig(baseUrl));
       const staff = await new JaneAppointments(client).listStaffMembers();
       assert.equal(staff.length, 1);
       assert.equal(staff[0].id, 12);
+      // The read must NOT have triggered a login.
+      assert.equal(client.isAuthenticated(), false, 'reads must not require auth');
     });
   });
 

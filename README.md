@@ -1,15 +1,48 @@
 # Jane Appointments (unofficial)
 
-Create appointments in [Jane App](https://jane.app) (`jane.app`) by logging into
-a clinic's own subdomain with **URL + username + password**, holding the session
-cookie, and calling the same internal JSON endpoints the Jane admin UI uses.
+[Jane App](https://jane.app) integration for a **Retell voice agent**, deployable
+on **Vercel** as a Next.js app.
 
-This is the "raw HTTP session" approach — fast and dependency-light, but
-**brittle and unofficial**. Read the caveats before relying on it.
+- **Reads** (staff, treatments, locations) use Jane's **public online-booking API**
+  — no login, no credentials. Just set `JANE_BASE_URL`.
+- **Booking** creates appointments via the internal session-authenticated API,
+  using staff `URL + username + password`.
 
-> ⚠️ **Authorization & ToS.** Jane has no open self-serve API and this method is
-> against Jane's Terms of Service. Only use it with **your own clinic's**
+> ⚠️ **Authorization & ToS.** Jane has no open self-serve API and the booking
+> path is against Jane's Terms of Service. Only use it with **your own clinic's**
 > account, with permission. It is not for accessing clinics you don't control.
+
+## Deploy on Vercel (for Retell)
+
+1. Push this repo to GitHub and import it at [vercel.com/new](https://vercel.com/new).
+2. Set environment variables in the Vercel project:
+   - `JANE_BASE_URL` — e.g. `https://yourclinic.janeapp.com` (required, reads).
+   - `RETELL_WEBHOOK_SECRET` — a long random string (required for booking).
+   - `JANE_USERNAME`, `JANE_PASSWORD` — staff login (required for booking only).
+3. Deploy. Vercel functions have full internet, so they reach Jane directly.
+
+### API endpoints
+
+| Method & path           | Auth                      | Purpose                       |
+| ----------------------- | ------------------------- | ----------------------------- |
+| `GET /api/health`       | none                      | liveness check                |
+| `GET /api/staff`        | none (public)             | practitioners + their IDs     |
+| `GET /api/treatments`   | none (public)             | bookable treatments           |
+| `GET /api/locations`    | none (public)             | clinic locations              |
+| `POST /api/appointments`| `x-api-key` + credentials | create an appointment         |
+
+`POST /api/appointments` body:
+`{ staffMemberId, treatmentId, patientId, locationId?, startAt, durationMinutes?, note? }`
+
+> Note: Vercel functions are stateless, so the booking path logs in per cold
+> start. For high volume, cache the session cookie in Vercel KV (see
+> `JaneClient.loadSession`/`saveSession`).
+
+---
+
+## The raw HTTP session approach (CLI / self-hosted)
+
+The same logic is available as a CLI and a standalone HTTP server, without Vercel.
 
 ---
 

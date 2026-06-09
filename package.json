@@ -1,17 +1,17 @@
 {
   "name": "jane-appointments",
   "version": "0.1.0",
-  "description": "Unofficial Jane App (jane.app) integration: authenticate against a clinic subdomain with username/password and create appointments via the internal session-authenticated API.",
+  "description": "Unofficial Jane App (jane.app) integration: read the public booking API and create appointments, exposed as a Next.js app deployable on Vercel for a Retell voice agent.",
+  "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "jane": "dist/cli.js"
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js",
+    "next:dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "cli": "tsx src/cli.ts",
     "login-check": "tsx src/cli.ts login-check",
+    "diagnose": "tsx src/cli.ts diagnose",
+    "serve": "tsx src/server.ts",
     "test": "tsx test/jane.mock.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -20,7 +20,8 @@
     "janeapp",
     "appointments",
     "scheduling",
-    "integration"
+    "retell",
+    "vercel"
   ],
   "license": "MIT",
   "dependencies": {
@@ -28,10 +29,15 @@
     "axios-cookiejar-support": "^5.0.3",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.5",
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tough-cookie": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   }

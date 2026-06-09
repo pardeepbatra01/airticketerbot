@@ -2,6 +2,11 @@ node_modules/
 dist/
 *.log
 
+# Next.js
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
 # Secrets / local config
 .env
 .env.local

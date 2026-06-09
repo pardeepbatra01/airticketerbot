@@ -240,9 +240,23 @@ export class JaneClient {
     return this.looksLoggedIn(res);
   }
 
-  // --- authenticated requests --------------------------------------------
+  // --- requests -----------------------------------------------------------
 
-  /** Authenticated JSON GET. */
+  /**
+   * Unauthenticated JSON GET against Jane's public online-booking API
+   * (e.g. /api/v2/staff_members, /treatments, /locations). These endpoints
+   * return data WITHOUT a session — no login, no credentials. Confirmed
+   * against a live clinic.
+   */
+  async publicGet<T = unknown>(path: string, params?: Record<string, unknown>): Promise<T> {
+    const res = await this.http.get(path, {
+      params,
+      headers: { Accept: 'application/json' },
+    });
+    return this.handleJson<T>(res, 'GET', path);
+  }
+
+  /** Authenticated JSON GET (logs in first). For non-public endpoints. */
   async apiGet<T = unknown>(path: string, params?: Record<string, unknown>): Promise<T> {
     await this.ensureAuthenticated();
     const res = await this.http.get(path, {
