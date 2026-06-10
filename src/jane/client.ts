@@ -145,6 +145,17 @@ export class JaneClient {
     );
   }
 
+  /**
+   * Return the `_jane_session` cookie value from the jar, or null if absent.
+   * Used after a form login to hand the live session to another client/process
+   * (e.g. the test console stores it in an httpOnly browser cookie).
+   */
+  async exportSessionCookie(): Promise<string | null> {
+    const { cookies } = await this.jar.serialize();
+    const found = cookies.find((c) => c.key === '_jane_session');
+    return found?.value ?? null;
+  }
+
   // --- authentication -----------------------------------------------------
 
   /**

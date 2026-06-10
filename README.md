@@ -57,6 +57,34 @@ duration is used.)
 
 ---
 
+## Test console (browser UI)
+
+A built-in console at `/` lets you exercise **every** endpoint by hand — no env
+vars, no Retell secret. You type the clinic URL + staff username/password into
+the page; it form-logs into Jane, keeps only the resulting session in an
+httpOnly cookie, and drives the `/api/console/*` routes.
+
+```bash
+npm install
+npm run next:dev          # http://localhost:3000
+```
+
+Then in the browser: **1** log in → **2** load & pick a staff member → **3** get
+their availability (pick treatment/location/date range; click a slot to prefill)
+→ **4** search or create a patient → **5** book the appointment and see the
+returned `state: "booked"`.
+
+Notes:
+- Credentials are entered in the UI, **not** read from `.env`. The console is
+  independent of `JANE_*` / `RETELL_WEBHOOK_SECRET`.
+- Form login fails if the staff account has **MFA** enabled (the UI shows the
+  error). It's a local test tool; the session cookie it stores is a live Jane
+  token, so run it somewhere you trust.
+- The production Retell routes (`/api/staff`, `/api/appointments`, …) are
+  separate and still use `x-api-key` + env auth.
+
+---
+
 ## The raw HTTP session approach (CLI / self-hosted)
 
 The same logic is available as a CLI and a standalone HTTP server, without Vercel.

@@ -318,6 +318,32 @@ async function main() {
     });
   });
 
+  await test('console flow: login → export session cookie → rebuild client → book', async () => {
+    await withServer('happy', async (baseUrl) => {
+      // 1. Form-login with credentials (what the console login route does).
+      const loginClient = new JaneClient(baseConfig(baseUrl));
+      await loginClient.login();
+      const cookie = await loginClient.exportSessionCookie();
+      assert.equal(cookie, 'valid-session-abc', 'must extract the _jane_session value');
+
+      // 2. Rebuild a fresh client from ONLY that cookie (what every console
+      //    request does via appointmentsFromSession) and drive an endpoint.
+      const sessionClient = new JaneClient(
+        baseConfig(baseUrl, { username: '', password: '', sessionCookie: cookie! }),
+      );
+      const appt = await new JaneAppointments(sessionClient).createAppointment({
+        staffMemberId: 12,
+        treatmentId: 34,
+        patientId: 56,
+        locationId: 1,
+        startAt: '2026-06-15T14:00:00-04:00',
+        durationMinutes: 30,
+      });
+      assert.equal(appt.id, 999);
+      assert.equal((appt as Record<string, unknown>).state, 'booked');
+    });
+  });
+
   await test('rejects MFA-enabled accounts with a clear error', async () => {
     await withServer('mfa', async (baseUrl) => {
       const client = new JaneClient(baseConfig(baseUrl));
@@ -338,7 +364,7 @@ async function main() {
     });
   });
 
-  console.log(`\n${passed}/9 passed`);
+  console.log(`\n${passed}/10 passed`);
 }
 
 main();
