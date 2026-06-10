@@ -223,9 +223,30 @@ export class JaneClient {
     await this.saveSession();
   }
 
+  /**
+   * Authenticate using a `_jane_session` cookie copied from a logged-in admin
+   * browser (env `JANE_SESSION_COOKIE`). We inject the cookie, then fetch
+   * `/admin` to (a) confirm the session is live and (b) read the per-page CSRF
+   * token Jane requires on writes. This is the preferred path: it skips the
+   * login form and any MFA challenge entirely.
+   */
+  private async authenticateWithCookie(): Promise<boolean> {
+    if (!this.config.sessionCookie) return false;
+    await this.jar
+      .setCookie(`_jane_session=${this.config.sessionCookie}`, this.config.baseUrl)
+      .catch(() => undefined);
+    const res = await this.http.get('/admin');
+    await this.maybeDump('cookie-auth', res);
+    if (!this.looksLoggedIn(res)) return false;
+    this.csrfToken = this.extractMetaCsrf(res.data) ?? this.csrfToken;
+    this.authenticated = true;
+    return true;
+  }
+
   /** Ensure we are logged in, logging in if necessary. */
   async ensureAuthenticated(): Promise<void> {
     if (this.authenticated) return;
+    if (await this.authenticateWithCookie()) return;
     if (await this.loadSession()) return;
     await this.login();
   }
@@ -279,6 +300,37 @@ export class JaneClient {
       },
     });
     return this.handleJson<T>(res, 'POST', path);
+  }
+
+  /** Authenticated JSON PUT (sends the CSRF token Jane requires for writes). */
+  async apiPut<T = unknown>(path: string, payload: unknown): Promise<T> {
+    await this.ensureAuthenticated();
+    const res = await this.http.put(path, payload, {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': this.csrfToken ?? '',
+        Origin: this.config.baseUrl,
+        Referer: `${this.config.baseUrl}/admin`,
+      },
+    });
+    return this.handleJson<T>(res, 'PUT', path);
+  }
+
+  /** Authenticated DELETE (used to release a reserved-but-unbooked slot). */
+  async apiDelete(path: string): Promise<void> {
+    await this.ensureAuthenticated();
+    const res = await this.http.delete(path, {
+      headers: {
+        Accept: 'application/json',
+        'X-CSRF-Token': this.csrfToken ?? '',
+        Origin: this.config.baseUrl,
+        Referer: `${this.config.baseUrl}/admin`,
+      },
+    });
+    if (res.status < 200 || res.status >= 300) {
+      throw new JaneApiError(`DELETE ${path} failed with HTTP ${res.status}.`, res.status, res.data);
+    }
   }
 
   private handleJson<T>(res: AxiosResponse, method: string, path: string): T {

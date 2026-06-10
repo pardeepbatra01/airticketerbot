@@ -1,24 +1,34 @@
 import type { JaneClient } from './client.js';
+import { addMinutes, toJaneDateTime } from './datetime.js';
 import {
+  type AvailabilityInput,
   type CreateAppointmentInput,
+  type CreatePatientInput,
   type CreatedAppointment,
   type Location,
   type Patient,
   type StaffMember,
+  type StaffOpenings,
   type Treatment,
 } from './types.js';
 
 /**
  * High-level appointment + lookup operations.
  *
- * ── IMPORTANT: endpoints below are the part Jane does not document. ──
- * The paths and the create payload mirror what the Jane admin UI sends, but
- * Jane can change them and they may differ slightly per clinic. They are all
- * collected in this one file so you can correct them in a single place after
- * capturing the real request from your clinic's DevTools Network tab.
- * See README → "Capturing the real endpoint".
+ * The admin endpoints below were captured from the live Jane admin UI (see
+ * JANE_CAPTURE_RESULTS) — Jane has no public API for them. Conventions:
+ *   - Reads of openings use the public `/api/v2/...` API (no auth).
+ *   - Admin reads/writes use `/admin/api/v2/...` and `/admin/api/v3/...` and
+ *     require an authenticated session (cookie) + CSRF token (handled by the
+ *     client).
+ *   - Datetimes are ISO-8601 WITH offset (see datetime.ts).
+ *   - Booking is two-step: reserve (`POST .../appointments`, state "reserved")
+ *     then book (`PUT .../appointments/:id/book`, state "booked").
  */
 export class JaneAppointments {
+  /** Client-generated tab id Jane includes on UI requests (telemetry). */
+  private readonly browserTabId = `srv-${Math.random().toString(36).slice(2, 14)}`;
+
   constructor(private readonly client: JaneClient) {}
 
   /** List staff members (practitioners). Public — no login required. */
@@ -45,48 +55,135 @@ export class JaneAppointments {
     );
   }
 
-  /** Search patients by name/email. Requires authentication (not public). */
-  async searchPatients(query: string): Promise<Patient[]> {
-    return unwrap<Patient>(
-      await this.client.apiGet('/api/v2/patients', { query }),
-      'patients',
-    );
+  /**
+   * Get a practitioner's open slots for a treatment + location over a date
+   * window. `location_id` is required by Jane (omitting it 404s).
+   *
+   * Returns one entry per practitioner; the bookable slots are in `.openings`.
+   * (`.openings` is empty when the staff member has no shifts configured.)
+   */
+  async getAvailability(input: AvailabilityInput): Promise<StaffOpenings[]> {
+    const data = await this.client.publicGet('/api/v2/openings', {
+      treatment_id: input.treatmentId,
+      staff_member_id: input.staffMemberId,
+      location_id: input.locationId,
+      start_date: input.startDate,
+      end_date: input.endDate,
+    });
+    return Array.isArray(data) ? (data as StaffOpenings[]) : [];
   }
 
   /**
-   * Create an appointment.
-   *
-   * The payload shape follows Jane's internal schedule "book" call. If creation
-   * returns an error, capture the real request (README) and adjust the keys
-   * here — they live in exactly one place on purpose.
+   * Search patients by name/email/phone — the admin "Add Client" typeahead.
+   * Requires authentication. Returns the matching patient objects.
+   */
+  async searchPatients(query: string): Promise<Patient[]> {
+    const data = await this.client.apiPost('/admin/api/v2/patient_lookup/lookup', {
+      q: query,
+      limit: 10,
+      autocomplete: true,
+      browser_tab_id: this.browserTabId,
+    });
+    return unwrap<Patient>(data, 'patients');
+  }
+
+  /**
+   * Create a patient. Only first/last name are required; email/phone improve
+   * matching. Jane returns the created patient (same shape as search results).
+   */
+  async createPatient(input: CreatePatientInput): Promise<Patient> {
+    const created = await this.client.apiPost<Patient | { patient: Patient }>(
+      '/admin/api/v2/patients',
+      {
+        patient: {
+          first_name: input.firstName,
+          last_name: input.lastName,
+          ...(input.email ? { email: input.email } : {}),
+          ...(input.mobilePhone ? { mobile_phone: input.mobilePhone } : {}),
+          ...(input.homePhone ? { home_phone: input.homePhone } : {}),
+        },
+        browser_tab_id: this.browserTabId,
+      },
+    );
+    return unwrapOne<Patient>(created, 'patient');
+  }
+
+  /**
+   * Book an appointment. Mirrors the admin UI's two-step flow:
+   *   1. Reserve  — POST /admin/api/v2/appointments  (state "reserved", no
+   *      treatment/patient yet) → returns the appointment id + record.
+   *   2. Book     — PUT  /admin/api/v3/appointments/:id/book  with the record
+   *      plus treatment_id + patient_id (+ patient) → state "booked".
+   * If the book step fails, we release the reserved slot so we don't leave an
+   * orphaned hold on the schedule.
    */
   async createAppointment(input: CreateAppointmentInput): Promise<CreatedAppointment> {
-    const startAt = toIso(input.startAt);
+    const startAt = toJaneDateTime(input.startAt, input.timeZone);
+    const endAt = await this.resolveEndAt(input, startAt);
 
-    const payload = {
+    // --- step 1: reserve -------------------------------------------------
+    const reserved = await this.client.apiPost<
+      CreatedAppointment | { appointment: CreatedAppointment }
+    >('/admin/api/v2/appointments', {
       appointment: {
-        staff_member_id: input.staffMemberId,
-        treatment_id: input.treatmentId,
-        patient_id: input.patientId,
         location_id: input.locationId,
         start_at: startAt,
-        ...(input.durationMinutes != null
-          ? { duration: input.durationMinutes, end_at: addMinutesIso(startAt, input.durationMinutes) }
-          : {}),
-        ...(input.note ? { note: input.note } : {}),
+        end_at: endAt,
+        staff_member_id: input.staffMemberId,
+        break: false,
+        room_id: null,
       },
-    };
+      book: false,
+      browser_tab_id: this.browserTabId,
+    });
+    const appt = unwrapOne<CreatedAppointment>(reserved, 'appointment');
 
-    const created = await this.client.apiPost<CreatedAppointment | { appointment: CreatedAppointment }>(
-      '/api/v2/appointments',
-      payload,
-    );
-
-    // Jane sometimes wraps the record under an "appointment" key.
-    if (created && typeof created === 'object' && 'appointment' in created) {
-      return (created as { appointment: CreatedAppointment }).appointment;
+    // --- step 2: book ----------------------------------------------------
+    try {
+      const booked = await this.client.apiPut<
+        CreatedAppointment | { appointment: CreatedAppointment }
+      >(`/admin/api/v3/appointments/${appt.id}/book`, {
+        book: true,
+        appointment: {
+          ...appt,
+          treatment_id: input.treatmentId,
+          patient_id: input.patientId,
+          ...(input.patient ? { patient: input.patient } : {}),
+          staff_member_id: input.staffMemberId,
+          location_id: input.locationId,
+          start_at: startAt,
+          end_at: endAt,
+          ...(input.note ? { note: input.note } : {}),
+        },
+        browser_tab_id: this.browserTabId,
+      });
+      return unwrapOne<CreatedAppointment>(booked, 'appointment');
+    } catch (err) {
+      // Best-effort cleanup of the dangling "reserved" hold.
+      await this.cancelAppointment(appt.id).catch(() => undefined);
+      throw err;
     }
-    return created as CreatedAppointment;
+  }
+
+  /** Cancel/delete an appointment (e.g. release a reserved hold). */
+  async cancelAppointment(appointmentId: number): Promise<void> {
+    await this.client.apiDelete(`/admin/api/v2/appointments/${appointmentId}`);
+  }
+
+  /** Compute `end_at`: explicit > start + duration > treatment's duration. */
+  private async resolveEndAt(input: CreateAppointmentInput, startAt: string): Promise<string> {
+    if (input.endAt != null) return toJaneDateTime(input.endAt, input.timeZone);
+    if (input.durationMinutes != null) return addMinutes(startAt, input.durationMinutes);
+
+    const treatment = (await this.listTreatments()).find((t) => t.id === input.treatmentId);
+    const duration = treatment?.scheduled_duration;
+    if (!duration) {
+      throw new Error(
+        `Cannot determine appointment length: pass durationMinutes or endAt, or ` +
+          `ensure treatment ${input.treatmentId} has a scheduled_duration.`,
+      );
+    }
+    return addMinutes(startAt, duration);
   }
 }
 
@@ -102,16 +199,10 @@ function unwrap<T>(data: unknown, key: string): T[] {
   return [];
 }
 
-function toIso(value: Date | string): string {
-  if (value instanceof Date) return value.toISOString();
-  // Pass strings through, but validate they parse.
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) {
-    throw new Error(`Invalid startAt value: ${value}`);
+/** Unwrap a single object that Jane may nest under `{ "<key>": {...} }`. */
+function unwrapOne<T>(data: unknown, key: string): T {
+  if (data && typeof data === 'object' && key in (data as Record<string, unknown>)) {
+    return (data as Record<string, T>)[key];
   }
-  return value;
-}
-
-function addMinutesIso(iso: string, minutes: number): string {
-  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+  return data as T;
 }

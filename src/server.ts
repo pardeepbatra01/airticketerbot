@@ -14,8 +14,10 @@ import { JaneApiError, JaneAuthError, type CreateAppointmentInput } from './jane
  *   POST /staff                       -> StaffMember[]
  *   POST /treatments                  -> Treatment[]
  *   POST /locations                   -> Location[]
+ *   POST /availability     { ... }    -> StaffOpenings[]
  *   POST /patients/search  { query }  -> Patient[]
- *   POST /appointments     { ... }    -> CreatedAppointment
+ *   POST /patients         { ... }    -> Patient (create)
+ *   POST /appointments     { ... }    -> CreatedAppointment (reserve + book)
  *
  * Auth: every request except /health must send  x-api-key: <RETELL_WEBHOOK_SECRET>.
  * Configure RETELL_WEBHOOK_SECRET and PORT in .env.
@@ -76,6 +78,14 @@ function requireNumber(body: Record<string, unknown>, key: string): number {
   return n;
 }
 
+function requireString(body: Record<string, unknown>, key: string): string {
+  const v = body[key];
+  if (typeof v !== 'string' || !v.trim()) {
+    throw new HttpError(400, `Missing or invalid "${key}" (expected a string)`);
+  }
+  return v;
+}
+
 class HttpError extends Error {
   constructor(
     public readonly status: number,
@@ -114,19 +124,51 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, await jane.listTreatments());
       case 'POST /locations':
         return send(res, 200, await jane.listLocations());
+      case 'POST /availability': {
+        return send(
+          res,
+          200,
+          await jane.getAvailability({
+            treatmentId: requireNumber(body, 'treatmentId'),
+            staffMemberId: requireNumber(body, 'staffMemberId'),
+            locationId: requireNumber(body, 'locationId'),
+            startDate: requireString(body, 'startDate'),
+            endDate: requireString(body, 'endDate'),
+          }),
+        );
+      }
       case 'POST /patients/search': {
         const query = typeof body.query === 'string' ? body.query : '';
         return send(res, 200, await jane.searchPatients(query));
+      }
+      case 'POST /patients': {
+        return send(
+          res,
+          200,
+          await jane.createPatient({
+            firstName: requireString(body, 'firstName'),
+            lastName: requireString(body, 'lastName'),
+            email: typeof body.email === 'string' ? body.email : undefined,
+            mobilePhone: typeof body.mobilePhone === 'string' ? body.mobilePhone : undefined,
+            homePhone: typeof body.homePhone === 'string' ? body.homePhone : undefined,
+          }),
+        );
       }
       case 'POST /appointments': {
         const input: CreateAppointmentInput = {
           staffMemberId: requireNumber(body, 'staffMemberId'),
           treatmentId: requireNumber(body, 'treatmentId'),
           patientId: requireNumber(body, 'patientId'),
-          locationId: body.locationId != null ? requireNumber(body, 'locationId') : undefined,
+          locationId: requireNumber(body, 'locationId'),
           startAt: String(body.startAt ?? ''),
+          endAt: typeof body.endAt === 'string' ? body.endAt : undefined,
           durationMinutes:
             body.durationMinutes != null ? requireNumber(body, 'durationMinutes') : undefined,
+          timeZone: typeof body.timeZone === 'string' ? body.timeZone : undefined,
+          patient:
+            body.patient && typeof body.patient === 'object'
+              ? (body.patient as CreateAppointmentInput['patient'])
+              : undefined,
           note: typeof body.note === 'string' ? body.note : undefined,
         };
         if (!input.startAt) throw new HttpError(400, 'Missing "startAt" (ISO-8601 datetime)');

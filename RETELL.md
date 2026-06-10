@@ -45,7 +45,78 @@ Replace `BASE` with your Vercel URL and `YOUR_SECRET` with the
 }
 ```
 
-## 4. book_appointment (write, secured)
+## 4. get_availability (read, public)
+
+```json
+{
+  "type": "custom",
+  "name": "get_availability",
+  "description": "List a practitioner's open appointment slots for a treatment and location over a date range. Call this to offer the caller specific times.",
+  "url": "BASE/api/availability",
+  "method": "POST",
+  "speak_during_execution": true,
+  "execution_message_description": "Let me check what's available.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "treatmentId":   { "type": "number", "description": "Treatment id from get_treatments" },
+      "staffMemberId": { "type": "number", "description": "Practitioner id from get_staff" },
+      "locationId":    { "type": "number", "description": "Location id from get_locations" },
+      "startDate":     { "type": "string", "description": "Window start, YYYY-MM-DD" },
+      "endDate":       { "type": "string", "description": "Window end, YYYY-MM-DD" }
+    },
+    "required": ["treatmentId", "staffMemberId", "locationId", "startDate", "endDate"]
+  }
+}
+```
+
+Returns one entry per practitioner; the bookable times are in `openings[]`. Use a
+slot's start time as `startAt` when booking.
+
+## 5. find_patient (read, secured)
+
+```json
+{
+  "type": "custom",
+  "name": "find_patient",
+  "description": "Look up an existing patient by name, email, or phone. Returns matches with their patient id.",
+  "url": "BASE/api/patients?q={query}",
+  "method": "GET",
+  "headers": { "x-api-key": "YOUR_SECRET" },
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": { "type": "string", "description": "Caller's name, email, or phone number" }
+    },
+    "required": ["query"]
+  }
+}
+```
+
+## 6. create_patient (write, secured)
+
+```json
+{
+  "type": "custom",
+  "name": "create_patient",
+  "description": "Create a new patient when find_patient returns no match. Returns the new patient id.",
+  "url": "BASE/api/patients",
+  "method": "POST",
+  "headers": { "x-api-key": "YOUR_SECRET" },
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "firstName":   { "type": "string" },
+      "lastName":    { "type": "string" },
+      "email":       { "type": "string" },
+      "mobilePhone": { "type": "string" }
+    },
+    "required": ["firstName", "lastName"]
+  }
+}
+```
+
+## 7. book_appointment (write, secured)
 
 ```json
 {
@@ -62,31 +133,41 @@ Replace `BASE` with your Vercel URL and `YOUR_SECRET` with the
     "properties": {
       "staffMemberId": { "type": "number", "description": "Practitioner id from get_staff" },
       "treatmentId":   { "type": "number", "description": "Treatment id from get_treatments" },
-      "patientId":     { "type": "number", "description": "Existing patient id" },
-      "locationId":    { "type": "number", "description": "Location id from get_locations" },
-      "startAt":       { "type": "string", "description": "ISO-8601 start time with offset, e.g. 2026-06-15T14:00:00-04:00" },
+      "patientId":     { "type": "number", "description": "Patient id from find_patient/create_patient" },
+      "locationId":    { "type": "number", "description": "Location id from get_locations (required)" },
+      "startAt":       { "type": "string", "description": "ISO-8601 start time with offset, e.g. 2026-06-15T14:00:00-04:00 (use an availability slot)" },
       "durationMinutes": { "type": "number", "description": "Optional; defaults to the treatment duration" },
       "note":          { "type": "string", "description": "Optional note" }
     },
-    "required": ["staffMemberId", "treatmentId", "patientId", "startAt"]
+    "required": ["staffMemberId", "treatmentId", "patientId", "locationId", "startAt"]
   }
 }
 ```
 
+> Booking is two-step server-side (reserve → book); the agent only calls this
+> once and gets back the booked appointment (`state: "booked"`).
+
 ## Suggested call flow (agent prompt guidance)
 
-1. Caller asks to book → `get_staff` (and `get_treatments` if needed) to map
-   names the caller says to IDs.
-2. Confirm practitioner, service, location, and a specific date/time.
-3. Identify the patient (see note below), then call `book_appointment`.
-4. Read back the confirmation from the response.
+1. Caller asks to book → `get_staff` (and `get_treatments` / `get_locations` if
+   needed) to map the names the caller says to IDs.
+2. `get_availability` for that practitioner + treatment + location over the
+   caller's preferred dates; offer specific open times.
+3. Identify the patient: `find_patient` by name/phone; if no match,
+   `create_patient`.
+4. Confirm everything, then `book_appointment` with a chosen slot's start time.
+5. Read back the confirmation from the response (`state: "booked"`).
 
-## Open items before booking works end-to-end
+## Deployment checklist
 
-- **Patient identification.** `book_appointment` needs a `patientId`. We still
-  need a way to resolve the caller to an existing patient (by phone/name) or
-  create one. This requires the authenticated patient-search/create endpoints —
-  to be captured from the Jane admin Network tab and added to the API.
-- **Booking auth on Vercel.** The write path logs into Jane per request; verify
-  it works against the live clinic (needs `JANE_USERNAME`/`JANE_PASSWORD` set in
-  Vercel and a non-MFA staff account). Reads need none of this.
+- **Vercel env vars.** Set `JANE_BASE_URL`, `RETELL_WEBHOOK_SECRET`, and
+  `JANE_SESSION_COOKIE` (the `_jane_session` cookie from a logged-in admin
+  browser — preferred over `JANE_USERNAME`/`JANE_PASSWORD`, and required if the
+  staff account has MFA). Set `JANE_TIMEZONE` (e.g. `America/Toronto`) if the
+  agent passes naive/UTC times rather than offset-tagged ISO.
+- **Auth scope.** Reads (`get_staff`, `get_treatments`, `get_locations`,
+  `get_availability`) are public — no secret, no session. Patient + booking
+  functions need both the `x-api-key` secret and the Jane session.
+- **Cookie rotation.** The `_jane_session` cookie expires eventually; if booking
+  starts returning `jane_auth_failed`, refresh `JANE_SESSION_COOKIE` from the
+  browser and redeploy.

@@ -15,6 +15,7 @@ import type { AddressInfo } from 'node:net';
 import { JaneClient } from '../src/jane/client.js';
 import { JaneAppointments } from '../src/jane/appointments.js';
 import { JaneAuthError } from '../src/jane/types.js';
+import { addMinutes, toJaneDateTime } from '../src/jane/datetime.js';
 
 type Mode = 'happy' | 'mfa' | 'badcreds';
 
@@ -111,6 +112,28 @@ function makeServer(mode: Mode): http.Server {
       return;
     }
 
+    if (url.pathname === '/api/v2/openings' && req.method === 'GET') {
+      // location_id is required — Jane 404s without it.
+      if (!url.searchParams.get('location_id')) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not found' }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify([
+          {
+            id: Number(url.searchParams.get('staff_member_id')),
+            full_name: 'Dr. Ada Lovelace',
+            first_date: '2026-06-15',
+            openings: [{ start_at: '2026-06-15T14:00:00-04:00', duration: 30 }],
+            shifts: [],
+          },
+        ]),
+      );
+      return;
+    }
+
     // --- authenticated JSON endpoints (writes) ---
     if (!authed) {
       // Real Jane redirects unauthenticated admin/API calls to the sign-in HTML.
@@ -119,15 +142,46 @@ function makeServer(mode: Mode): http.Server {
       return;
     }
 
-    if (url.pathname === '/api/v2/appointments' && req.method === 'POST') {
-      assert.equal(req.headers['x-csrf-token'], META_TOKEN, 'create must send the meta CSRF token');
+    // Patient typeahead — POST lookup returns a bare array.
+    if (url.pathname === '/admin/api/v2/patient_lookup/lookup' && req.method === 'POST') {
+      assert.equal(req.headers['x-csrf-token'], META_TOKEN, 'lookup must send the meta CSRF token');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify([{ id: 56, name: 'Jo Doe', email: 'jo@example.com' }]));
+      return;
+    }
+
+    // Step 1: reserve — returns a "reserved" appointment with an id.
+    if (url.pathname === '/admin/api/v2/appointments' && req.method === 'POST') {
+      assert.equal(req.headers['x-csrf-token'], META_TOKEN, 'reserve must send the meta CSRF token');
       let body = '';
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         const payload = JSON.parse(body);
-        // Echo back a created record under the "appointment" wrapper.
+        assert.equal(payload.book, false, 'reserve must send book:false');
         res.writeHead(201, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ appointment: { id: 999, ...payload.appointment } }));
+        res.end(
+          JSON.stringify({
+            appointment: { id: 999, state: 'reserved', booked: false, ...payload.appointment },
+          }),
+        );
+      });
+      return;
+    }
+
+    // Step 2: book — PUT flips the reserved appointment to "booked".
+    if (url.pathname === '/admin/api/v3/appointments/999/book' && req.method === 'PUT') {
+      assert.equal(req.headers['x-csrf-token'], META_TOKEN, 'book must send the meta CSRF token');
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        const payload = JSON.parse(body);
+        assert.equal(payload.book, true, 'book must send book:true');
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            appointment: { ...payload.appointment, state: 'booked', booked: true },
+          }),
+        );
       });
       return;
     }
@@ -148,13 +202,16 @@ async function withServer(mode: Mode, fn: (baseUrl: string) => Promise<void>): P
   }
 }
 
-function baseConfig(baseUrl: string) {
+function baseConfig(baseUrl: string, overrides: Record<string, unknown> = {}) {
   return {
     baseUrl,
     username: GOOD_USER,
     password: GOOD_PASS,
+    sessionCookie: '',
     sessionFile: null,
+    timeZone: undefined,
     debug: false,
+    ...overrides,
   };
 }
 
@@ -173,6 +230,19 @@ async function test(name: string, fn: () => Promise<void>): Promise<void> {
 
 async function main() {
   console.log('Jane client integration (local mock):');
+
+  await test('datetime: offset-tagged passthrough, Z + naive conversion, addMinutes', async () => {
+    // Offset-tagged strings are Jane-shaped already → untouched.
+    assert.equal(toJaneDateTime('2026-06-15T14:00:00-04:00'), '2026-06-15T14:00:00-04:00');
+    // UTC Z resolved into the clinic's zone (Toronto is -04:00 in June).
+    assert.equal(toJaneDateTime('2026-06-15T18:00:00Z', 'America/Toronto'), '2026-06-15T14:00:00-04:00');
+    // Naive wall-clock interpreted as clinic-local.
+    assert.equal(toJaneDateTime('2026-06-15T14:00:00', 'America/Toronto'), '2026-06-15T14:00:00-04:00');
+    // addMinutes preserves the offset.
+    assert.equal(addMinutes('2026-06-15T14:00:00-04:00', 30), '2026-06-15T14:30:00-04:00');
+    // No millis, no Z.
+    assert.ok(!/\.\d{3}/.test(toJaneDateTime(new Date('2026-06-15T18:00:00Z'), 'America/Toronto')));
+  });
 
   await test('logs in, extracts CSRF, holds session', async () => {
     await withServer('happy', async (baseUrl) => {
@@ -193,7 +263,41 @@ async function main() {
     });
   });
 
-  await test('creates an appointment with CSRF token + correct payload', async () => {
+  await test('authenticates from a session cookie (no login form)', async () => {
+    await withServer('badcreds', async (baseUrl) => {
+      // badcreds mode would reject a form login — proving we used the cookie.
+      const client = new JaneClient(baseConfig(baseUrl, { sessionCookie: 'valid-session-abc' }));
+      await client.ensureAuthenticated();
+      assert.equal(client.isAuthenticated(), true);
+    });
+  });
+
+  await test('gets availability (openings) without auth, requires location', async () => {
+    await withServer('happy', async (baseUrl) => {
+      const client = new JaneClient(baseConfig(baseUrl));
+      const slots = await new JaneAppointments(client).getAvailability({
+        treatmentId: 34,
+        staffMemberId: 12,
+        locationId: 1,
+        startDate: '2026-06-15',
+        endDate: '2026-06-19',
+      });
+      assert.equal(slots.length, 1);
+      assert.equal(slots[0].openings.length, 1);
+      assert.equal(client.isAuthenticated(), false, 'openings must not require auth');
+    });
+  });
+
+  await test('searches patients via the POST lookup endpoint', async () => {
+    await withServer('happy', async (baseUrl) => {
+      const client = new JaneClient(baseConfig(baseUrl));
+      const patients = await new JaneAppointments(client).searchPatients('jo');
+      assert.equal(patients.length, 1);
+      assert.equal(patients[0].id, 56);
+    });
+  });
+
+  await test('books an appointment via reserve + book (two-step), CSRF on both', async () => {
     await withServer('happy', async (baseUrl) => {
       const client = new JaneClient(baseConfig(baseUrl));
       const appt = await new JaneAppointments(client).createAppointment({
@@ -201,13 +305,16 @@ async function main() {
         treatmentId: 34,
         patientId: 56,
         locationId: 1,
-        startAt: '2026-06-15T14:00:00-07:00',
+        startAt: '2026-06-15T14:00:00-04:00',
         durationMinutes: 30,
         note: 'Follow-up',
       });
       assert.equal(appt.id, 999);
-      assert.equal((appt as Record<string, unknown>).staff_member_id, 12);
+      assert.equal((appt as Record<string, unknown>).state, 'booked');
+      assert.equal((appt as Record<string, unknown>).booked, true);
       assert.equal((appt as Record<string, unknown>).treatment_id, 34);
+      assert.equal((appt as Record<string, unknown>).patient_id, 56);
+      assert.equal((appt as Record<string, unknown>).staff_member_id, 12);
     });
   });
 
@@ -231,7 +338,7 @@ async function main() {
     });
   });
 
-  console.log(`\n${passed}/5 passed`);
+  console.log(`\n${passed}/9 passed`);
 }
 
 main();

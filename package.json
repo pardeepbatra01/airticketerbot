@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "cli": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts",
     "login-check": "tsx src/cli.ts login-check",
     "diagnose": "tsx src/cli.ts diagnose",
     "serve": "tsx src/server.ts",

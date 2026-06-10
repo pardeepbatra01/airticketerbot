@@ -11,6 +11,7 @@
  */
 export { JaneClient } from './jane/client.js';
 export { JaneAppointments } from './jane/appointments.js';
+export { toJaneDateTime, addMinutes } from './jane/datetime.js';
 export * from './jane/types.js';
 export { loadConfig, normalizeBaseUrl, type JaneConfig } from './config.js';
 

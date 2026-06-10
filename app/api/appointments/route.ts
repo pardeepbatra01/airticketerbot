@@ -33,9 +33,15 @@ export async function POST(req: Request) {
       staffMemberId: num('staffMemberId'),
       treatmentId: num('treatmentId'),
       patientId: num('patientId'),
-      locationId: body.locationId != null ? num('locationId') : undefined,
+      locationId: num('locationId'),
       startAt: String(body.startAt),
+      endAt: typeof body.endAt === 'string' ? body.endAt : undefined,
       durationMinutes: body.durationMinutes != null ? num('durationMinutes') : undefined,
+      timeZone: typeof body.timeZone === 'string' ? body.timeZone : undefined,
+      patient:
+        body.patient && typeof body.patient === 'object'
+          ? (body.patient as CreateAppointmentInput['patient'])
+          : undefined,
       note: typeof body.note === 'string' ? body.note : undefined,
     };
     const created = await authedAppointments().createAppointment(input);

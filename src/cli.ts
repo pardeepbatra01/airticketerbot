@@ -89,12 +89,35 @@ async function main() {
       console.log(JSON.stringify(await appts.searchPatients(query), null, 2));
       break;
     }
+    case 'create-patient': {
+      const created = await appts.createPatient({
+        firstName: String(flags.first ?? ''),
+        lastName: String(flags.last ?? ''),
+        email: typeof flags.email === 'string' ? flags.email : undefined,
+        mobilePhone: typeof flags.mobile === 'string' ? flags.mobile : undefined,
+        homePhone: typeof flags.home === 'string' ? flags.home : undefined,
+      });
+      console.log('✓ Created patient:');
+      console.log(JSON.stringify(created, null, 2));
+      break;
+    }
+    case 'availability': {
+      const slots = await appts.getAvailability({
+        treatmentId: requireNum(flags, 'treatment'),
+        staffMemberId: requireNum(flags, 'staff'),
+        locationId: requireNum(flags, 'location'),
+        startDate: String(flags.start),
+        endDate: String(flags.end ?? flags.start),
+      });
+      console.log(JSON.stringify(slots, null, 2));
+      break;
+    }
     case 'create': {
       const created = await appts.createAppointment({
         staffMemberId: requireNum(flags, 'staff'),
         treatmentId: requireNum(flags, 'treatment'),
         patientId: requireNum(flags, 'patient'),
-        locationId: flags.location !== undefined ? requireNum(flags, 'location') : undefined,
+        locationId: requireNum(flags, 'location'),
         startAt: String(flags.start),
         durationMinutes: flags.duration !== undefined ? requireNum(flags, 'duration') : undefined,
         note: typeof flags.note === 'string' ? flags.note : undefined,
@@ -119,10 +142,15 @@ Commands:
   staff                       List staff members (get their IDs)
   treatments                  List treatments (get their IDs)
   locations                   List locations (get their IDs)
-  patients "<query>"          Search patients by name/email
-  create --staff N --treatment N --patient N [--location N]
+  patients "<query>"          Search patients by name/email/phone
+  create-patient --first "Jo" --last "Doe" [--email ..] [--mobile ..] [--home ..]
+                              Create a new patient
+  availability --treatment N --staff N --location N
+         --start "YYYY-MM-DD" [--end "YYYY-MM-DD"]
+                              List a practitioner's open slots
+  create --staff N --treatment N --patient N --location N
          --start "<ISO>" [--duration MIN] [--note "..."]
-                              Create an appointment
+                              Book an appointment (reserve + book)
 
 Config comes from .env (copy .env.example). See README.md.`);
 }
