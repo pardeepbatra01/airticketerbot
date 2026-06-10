@@ -182,19 +182,20 @@ function Login({ onLoggedIn }: { onLoggedIn: (baseUrl: string) => void }) {
       {mode === 'cookie' ? (
         <>
           <label style={label}>
-            <code>_jane_session</code> cookie value
+            <code>_front_desk_session</code> cookie value
           </label>
           <textarea
             style={{ ...input, minHeight: 70, fontFamily: 'monospace' }}
-            placeholder="paste the _jane_session value…"
+            placeholder="paste the _front_desk_session value…"
             value={sessionCookie}
             onChange={(e) => setSessionCookie(e.target.value)}
           />
           <p style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
-            In a tab where you&apos;re logged into Jane: DevTools → Application →
-            Cookies → your clinic → copy <code>_jane_session</code>. This avoids
-            Jane&apos;s new-device verification (which blocks server-side password
-            login from Vercel).
+            In a tab where you&apos;re logged into Jane admin: DevTools → Application
+            → Cookies → your clinic → copy <code>_front_desk_session</code> (the
+            large httpOnly session cookie — Jane admin does not use
+            <code>_jane_session</code>). This avoids Jane&apos;s new-device
+            verification (which blocks server-side password login from Vercel).
           </p>
         </>
       ) : (

@@ -23,7 +23,7 @@ const GOOD_USER = 'clinic@example.com';
 const GOOD_PASS = 's3cret';
 const FORM_TOKEN = 'FORM-CSRF-TOKEN-123';
 const META_TOKEN = 'META-CSRF-TOKEN-456';
-const SESSION_COOKIE = '_jane_session=valid-session-abc';
+const SESSION_COOKIE = '_front_desk_session=valid-session-abc';
 
 // Deliberately uses a NON-/admin action and namespaced field names that don't
 // match any hardcoded guess — proves the client parses the real form (action +
@@ -61,7 +61,7 @@ function makeServer(mode: Mode): http.Server {
   return http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const cookie = req.headers.cookie ?? '';
-    const authed = cookie.includes('_jane_session=valid-session-abc');
+    const authed = cookie.includes('_front_desk_session=valid-session-abc');
 
     // --- sign-in page / dashboard ---
     if (url.pathname === '/admin' && req.method === 'GET') {
@@ -324,7 +324,7 @@ async function main() {
       const loginClient = new JaneClient(baseConfig(baseUrl));
       await loginClient.login();
       const cookie = await loginClient.exportSessionCookie();
-      assert.equal(cookie, 'valid-session-abc', 'must extract the _jane_session value');
+      assert.equal(cookie, 'valid-session-abc', 'must extract the _front_desk_session value');
 
       // 2. Rebuild a fresh client from ONLY that cookie (what every console
       //    request does via appointmentsFromSession) and drive an endpoint.

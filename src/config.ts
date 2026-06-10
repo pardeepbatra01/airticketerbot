@@ -6,7 +6,7 @@ export interface JaneConfig {
   username: string;
   password: string;
   /**
-   * The `_jane_session` cookie value, copied from a logged-in admin browser.
+   * The `_front_desk_session` cookie value, copied from a logged-in admin browser.
    * When set, the client authenticates as that session (skipping the login
    * form + MFA) — this is the preferred, reliable auth path. Empty = unused.
    */

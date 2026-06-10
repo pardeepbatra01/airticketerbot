@@ -9,7 +9,7 @@ import { JaneApiError, JaneAuthError } from '../../../src/jane/types.js';
  *
  * Unlike the Retell production routes, the console takes the clinic URL +
  * credentials from the UI — never from env. After a successful form login we
- * keep only the resulting Jane `_jane_session` cookie (the credentials are
+ * keep only the resulting Jane `_front_desk_session` cookie (the credentials are
  * discarded) and stash it, with the baseUrl, in an httpOnly browser cookie.
  * Every console request rebuilds a JaneClient from that via the cheap
  * cookie-auth path. No server-side session store; works locally and on Vercel.

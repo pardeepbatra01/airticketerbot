@@ -7,6 +7,15 @@ import type { JaneConfig } from '../config.js';
 import { JaneApiError, JaneAuthError } from './types.js';
 
 /**
+ * Name of the cookie that holds the authenticated Jane *admin* (front-desk)
+ * session. Jane's admin UI uses `_front_desk_session` — NOT `_jane_session`
+ * (which is the patient-facing booking site's cookie and does not exist on the
+ * /admin host). The captured endpoints are all `/admin/api/v2/...`, so this is
+ * the cookie we must send and the one a form login sets.
+ */
+const SESSION_COOKIE_NAME = '_front_desk_session';
+
+/**
  * Low-level session client for a Jane clinic subdomain.
  *
  * Responsibilities:
@@ -146,13 +155,14 @@ export class JaneClient {
   }
 
   /**
-   * Return the `_jane_session` cookie value from the jar, or null if absent.
-   * Used after a form login to hand the live session to another client/process
-   * (e.g. the test console stores it in an httpOnly browser cookie).
+   * Return the `_front_desk_session` cookie value from the jar, or null if
+   * absent. Used after a form login to hand the live session to another
+   * client/process (e.g. the test console stores it in an httpOnly browser
+   * cookie).
    */
   async exportSessionCookie(): Promise<string | null> {
     const { cookies } = await this.jar.serialize();
-    const found = cookies.find((c) => c.key === '_jane_session');
+    const found = cookies.find((c) => c.key === SESSION_COOKIE_NAME);
     return found?.value ?? null;
   }
 
@@ -235,8 +245,8 @@ export class JaneClient {
   }
 
   /**
-   * Authenticate using a `_jane_session` cookie copied from a logged-in admin
-   * browser (env `JANE_SESSION_COOKIE`). We inject the cookie, then fetch
+   * Authenticate using a `_front_desk_session` cookie copied from a logged-in
+   * admin browser (env `JANE_SESSION_COOKIE`). We inject the cookie, then fetch
    * `/admin` to (a) confirm the session is live and (b) read the per-page CSRF
    * token Jane requires on writes. This is the preferred path: it skips the
    * login form and any MFA challenge entirely.
@@ -244,7 +254,7 @@ export class JaneClient {
   async authenticateWithCookie(): Promise<boolean> {
     if (!this.config.sessionCookie) return false;
     await this.jar
-      .setCookie(`_jane_session=${this.config.sessionCookie}`, this.config.baseUrl)
+      .setCookie(`${SESSION_COOKIE_NAME}=${this.config.sessionCookie}`, this.config.baseUrl)
       .catch(() => undefined);
     const res = await this.http.get('/admin');
     await this.maybeDump('cookie-auth', res);

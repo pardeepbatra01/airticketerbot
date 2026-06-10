@@ -12,12 +12,12 @@ export const dynamic = 'force-dynamic';
  *   { baseUrl, username, password }   — form-login to Jane (only works from a
  *                                       trusted IP; new IPs get an MFA/device
  *                                       challenge that raw HTTP can't answer).
- *   { baseUrl, sessionCookie }        — use a `_jane_session` cookie copied from
- *                                       a logged-in browser. Skips the login form
- *                                       and any device challenge — the reliable
- *                                       path on Vercel.
- * Either way we end up storing only the `_jane_session` value in our httpOnly
- * cookie; credentials are never persisted.
+ *   { baseUrl, sessionCookie }        — use a `_front_desk_session` cookie copied
+ *                                       from a logged-in admin browser. Skips the
+ *                                       login form and any device challenge — the
+ *                                       reliable path on Vercel.
+ * Either way we end up storing only the `_front_desk_session` value in our
+ * httpOnly cookie; credentials are never persisted.
  */
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
@@ -76,9 +76,9 @@ export async function POST(req: Request) {
       const ok = await client.authenticateWithCookie();
       if (!ok) {
         throw new JaneAuthError(
-          'That _jane_session cookie was rejected — it may be expired or for a ' +
-            'different clinic. Re-copy it from a logged-in browser (DevTools → ' +
-            'Application → Cookies) and try again.',
+          'That _front_desk_session cookie was rejected — it may be expired or ' +
+            'for a different clinic. Re-copy it from a logged-in admin browser ' +
+            '(DevTools → Application → Cookies → _front_desk_session) and try again.',
         );
       }
       janeSession = sessionCookie;
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
       if (!janeSession) {
         throw new JaneAuthError(
           'Logged in but could not read the session cookie. Use the session-cookie ' +
-            'login instead (copy _jane_session from a logged-in browser).',
+            'login instead (copy _front_desk_session from a logged-in browser).',
         );
       }
     }
