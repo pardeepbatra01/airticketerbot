@@ -16,23 +16,27 @@ session is kept in an httpOnly cookie, so it works on Vercel serverless.
 
 ## Setup
 
-1. Open the **Vercel preview URL** for branch `claude/jain-app-integration-5fCrO`
-   (commit `0caa3eb`). The console is at `/`.
+1. **Grab the Jane session cookie first.** You're already logged into Jane in
+   this browser (same session you used for the endpoint captures). Read the
+   **`_jane_session`** cookie for the clinic:
+   - DevTools → **Application → Cookies → `https://<clinic>.janeapp.com`** → copy
+     the **`_jane_session`** value. (Keep it handy for the login step; treat it
+     like a password.)
+2. Open the **Vercel preview URL** for branch `claude/jain-app-integration-5fCrO`
+   (latest commit). The console is at `/`.
    - If you hit a Vercel login wall, that's Deployment Protection — sign in to
      Vercel in the same browser, or it must be disabled on the project.
-2. You'll see **"Jane Test Console"** with a login form.
+3. You'll see **"Jane Test Console"** with a login form (two tabs).
 
 ## Walkthrough (do each, in order)
 
-### 1 · Log in
-The login has two tabs:
-- **Session cookie (use this on Vercel).** In a tab where you're logged into
-  Jane: DevTools → Application → Cookies → your clinic → copy the
-  `_jane_session` value. Paste it + the clinic URL → **Log in**. This is the
-  reliable path — Jane blocks server-side *password* login from new IPs (incl.
-  Vercel) with an emailed device code.
-- **Username + password.** Only works from a trusted IP; on Vercel it returns the
-  MFA/new-device error.
+### 1 · Log in  — use the **Session cookie** tab
+- Select the **Session cookie** tab.
+- Paste the clinic URL (`https://<clinic>.janeapp.com`) and the **`_jane_session`**
+  value you copied in Setup → **Log in**.
+- Why not username/password: Jane blocks server-side password login from new IPs
+  (incl. Vercel) with an emailed device code that the server can't answer. The
+  cookie reuses your already-trusted browser session, so it just works.
 
 Expect: the form is replaced by a green "✓ Connected to …" bar and the Staff
 section. If it errors, copy the exact red message (that's Jane's own reason).
