@@ -126,9 +126,11 @@ export default function Home() {
 
 // ---- login ----------------------------------------------------------------
 function Login({ onLoggedIn }: { onLoggedIn: (baseUrl: string) => void }) {
+  const [mode, setMode] = useState<'cookie' | 'password'>('cookie');
   const [baseUrl, setBaseUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [sessionCookie, setSessionCookie] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -136,10 +138,11 @@ function Login({ onLoggedIn }: { onLoggedIn: (baseUrl: string) => void }) {
     setErr(null);
     setBusy(true);
     try {
-      const res = await api('/api/console/login', {
-        method: 'POST',
-        json: { baseUrl, username, password },
-      });
+      const json =
+        mode === 'cookie'
+          ? { baseUrl, sessionCookie }
+          : { baseUrl, username, password };
+      const res = await api('/api/console/login', { method: 'POST', json });
       onLoggedIn(res.baseUrl ?? baseUrl);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -148,9 +151,26 @@ function Login({ onLoggedIn }: { onLoggedIn: (baseUrl: string) => void }) {
     }
   }
 
+  const tab = (m: 'cookie' | 'password'): CSSProperties => ({
+    ...btnGhost,
+    borderColor: mode === m ? '#2b6cb0' : '#ccc',
+    background: mode === m ? '#ebf8ff' : '#fff',
+    color: mode === m ? '#2b6cb0' : '#666',
+    marginRight: 8,
+  });
+
   return (
     <section style={card}>
       <h2 style={h2}>1 · Log in</h2>
+      <div style={{ marginBottom: 12 }}>
+        <button style={tab('cookie')} onClick={() => setMode('cookie')}>
+          Session cookie
+        </button>
+        <button style={tab('password')} onClick={() => setMode('password')}>
+          Username + password
+        </button>
+      </div>
+
       <label style={label}>Jane clinic URL</label>
       <input
         style={input}
@@ -158,25 +178,54 @@ function Login({ onLoggedIn }: { onLoggedIn: (baseUrl: string) => void }) {
         value={baseUrl}
         onChange={(e) => setBaseUrl(e.target.value)}
       />
-      <label style={label}>Username / email</label>
-      <input style={input} value={username} onChange={(e) => setUsername(e.target.value)} />
-      <label style={label}>Password</label>
-      <input
-        style={input}
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && submit()}
-      />
+
+      {mode === 'cookie' ? (
+        <>
+          <label style={label}>
+            <code>_jane_session</code> cookie value
+          </label>
+          <textarea
+            style={{ ...input, minHeight: 70, fontFamily: 'monospace' }}
+            placeholder="paste the _jane_session value…"
+            value={sessionCookie}
+            onChange={(e) => setSessionCookie(e.target.value)}
+          />
+          <p style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
+            In a tab where you&apos;re logged into Jane: DevTools → Application →
+            Cookies → your clinic → copy <code>_jane_session</code>. This avoids
+            Jane&apos;s new-device verification (which blocks server-side password
+            login from Vercel).
+          </p>
+        </>
+      ) : (
+        <>
+          <label style={label}>Username / email</label>
+          <input style={input} value={username} onChange={(e) => setUsername(e.target.value)} />
+          <label style={label}>Password</label>
+          <input
+            style={input}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+          <p style={{ color: '#b7791f', fontSize: 12, marginTop: 6 }}>
+            Note: Jane challenges logins from new IPs (incl. Vercel) with an emailed
+            code, which this can&apos;t answer — use the session-cookie tab if it fails.
+          </p>
+        </>
+      )}
+
       <Err msg={err} />
       <div style={{ marginTop: 12 }}>
-        <button style={btn} onClick={submit} disabled={busy}>
+        <button
+          style={btn}
+          onClick={submit}
+          disabled={busy || !baseUrl || (mode === 'cookie' ? !sessionCookie : !username || !password)}
+        >
           {busy ? 'Signing in…' : 'Log in'}
         </button>
       </div>
-      <p style={{ color: '#999', fontSize: 12, marginTop: 10 }}>
-        Form login fails if the account has 2-Step Verification (MFA) enabled.
-      </p>
     </section>
   );
 }

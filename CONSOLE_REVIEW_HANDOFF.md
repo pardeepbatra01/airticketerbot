@@ -25,10 +25,17 @@ session is kept in an httpOnly cookie, so it works on Vercel serverless.
 ## Walkthrough (do each, in order)
 
 ### 1 · Log in
-- Enter the clinic URL (`https://<clinic>.janeapp.com`), Jane username, password.
-- Click **Log in**. Expect: the form is replaced by a green "✓ Connected to …"
-  bar and the Staff section.
-- **If it errors**, copy the exact red message (that's Jane's own reason).
+The login has two tabs:
+- **Session cookie (use this on Vercel).** In a tab where you're logged into
+  Jane: DevTools → Application → Cookies → your clinic → copy the
+  `_jane_session` value. Paste it + the clinic URL → **Log in**. This is the
+  reliable path — Jane blocks server-side *password* login from new IPs (incl.
+  Vercel) with an emailed device code.
+- **Username + password.** Only works from a trusted IP; on Vercel it returns the
+  MFA/new-device error.
+
+Expect: the form is replaced by a green "✓ Connected to …" bar and the Staff
+section. If it errors, copy the exact red message (that's Jane's own reason).
 
 ### 2 · Staff
 - Click **Load staff, treatments & locations**.

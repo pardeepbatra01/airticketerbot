@@ -241,7 +241,7 @@ export class JaneClient {
    * token Jane requires on writes. This is the preferred path: it skips the
    * login form and any MFA challenge entirely.
    */
-  private async authenticateWithCookie(): Promise<boolean> {
+  async authenticateWithCookie(): Promise<boolean> {
     if (!this.config.sessionCookie) return false;
     await this.jar
       .setCookie(`_jane_session=${this.config.sessionCookie}`, this.config.baseUrl)

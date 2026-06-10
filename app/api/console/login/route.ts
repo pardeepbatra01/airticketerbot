@@ -7,8 +7,18 @@ import { consoleError, writeAuthCookie } from '../_session.js';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// POST { baseUrl, username, password } — form-login to Jane, then store only the
-// resulting _jane_session cookie. Credentials are not persisted anywhere.
+/**
+ * POST one of:
+ *   { baseUrl, username, password }   — form-login to Jane (only works from a
+ *                                       trusted IP; new IPs get an MFA/device
+ *                                       challenge that raw HTTP can't answer).
+ *   { baseUrl, sessionCookie }        — use a `_jane_session` cookie copied from
+ *                                       a logged-in browser. Skips the login form
+ *                                       and any device challenge — the reliable
+ *                                       path on Vercel.
+ * Either way we end up storing only the `_jane_session` value in our httpOnly
+ * cookie; credentials are never persisted.
+ */
 export async function POST(req: Request) {
   let body: Record<string, unknown>;
   try {
@@ -18,11 +28,22 @@ export async function POST(req: Request) {
   }
 
   const baseUrlRaw = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
+  const sessionCookie = typeof body.sessionCookie === 'string' ? body.sessionCookie.trim() : '';
   const username = typeof body.username === 'string' ? body.username : '';
   const password = typeof body.password === 'string' ? body.password : '';
-  if (!baseUrlRaw || !username || !password) {
+
+  if (!baseUrlRaw) {
     return NextResponse.json(
-      { error: 'bad_request', message: 'baseUrl, username and password are all required.' },
+      { error: 'bad_request', message: 'baseUrl is required.' },
+      { status: 400 },
+    );
+  }
+  if (!sessionCookie && !(username && password)) {
+    return NextResponse.json(
+      {
+        error: 'bad_request',
+        message: 'Provide either a sessionCookie, or both username and password.',
+      },
       { status: 400 },
     );
   }
@@ -42,19 +63,37 @@ export async function POST(req: Request) {
       baseUrl,
       username,
       password,
-      sessionCookie: '',
+      sessionCookie,
       sessionFile: null,
       timeZone: (process.env.JANE_TIMEZONE ?? '').trim() || undefined,
       debug: false,
     });
-    await client.login();
-    const janeSession = await client.exportSessionCookie();
-    if (!janeSession) {
-      throw new JaneAuthError(
-        'Logged in but could not read the session cookie. The clinic may set it ' +
-          'under a different name — capture it from DevTools and use cookie auth.',
-      );
+
+    let janeSession: string | null;
+    if (sessionCookie) {
+      // Cookie path: verify it's a live session (cookie-only — no form-login
+      // fallback, so the error stays accurate).
+      const ok = await client.authenticateWithCookie();
+      if (!ok) {
+        throw new JaneAuthError(
+          'That _jane_session cookie was rejected — it may be expired or for a ' +
+            'different clinic. Re-copy it from a logged-in browser (DevTools → ' +
+            'Application → Cookies) and try again.',
+        );
+      }
+      janeSession = sessionCookie;
+    } else {
+      // Credential path: form-login, then read the resulting session cookie.
+      await client.login();
+      janeSession = await client.exportSessionCookie();
+      if (!janeSession) {
+        throw new JaneAuthError(
+          'Logged in but could not read the session cookie. Use the session-cookie ' +
+            'login instead (copy _jane_session from a logged-in browser).',
+        );
+      }
     }
+
     const res = NextResponse.json({ authenticated: true, baseUrl });
     writeAuthCookie(res, { baseUrl, janeSession });
     return res;

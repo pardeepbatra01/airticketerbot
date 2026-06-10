@@ -74,12 +74,17 @@ their availability (pick treatment/location/date range; click a slot to prefill)
 → **4** search or create a patient → **5** book the appointment and see the
 returned `state: "booked"`.
 
+The login has two tabs: **Session cookie** (paste `_jane_session` from a
+logged-in browser) and **Username + password**. On Vercel — or any server whose
+IP Jane doesn't recognize — use the **cookie** tab: Jane challenges server-side
+password logins from new IPs with an emailed device code that raw HTTP can't
+answer. Password login works from a trusted IP / locally.
+
 Notes:
-- Credentials are entered in the UI, **not** read from `.env`. The console is
-  independent of `JANE_*` / `RETELL_WEBHOOK_SECRET`.
-- Form login fails if the staff account has **MFA** enabled (the UI shows the
-  error). It's a local test tool; the session cookie it stores is a live Jane
-  token, so run it somewhere you trust.
+- Auth is entered in the UI, **not** read from `.env`. The console is independent
+  of `JANE_*` / `RETELL_WEBHOOK_SECRET`.
+- The session it stores (in an httpOnly cookie) is a live Jane token, so run it
+  somewhere you trust.
 - The production Retell routes (`/api/staff`, `/api/appointments`, …) are
   separate and still use `x-api-key` + env auth.
 
